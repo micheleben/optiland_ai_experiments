@@ -1,5 +1,7 @@
 
-# a glossary to help undestanding a sequential raytracer
+# A Glossary to Help Understanding a Sequential Raytracer
+
+This glossary is a work in progress. It will be complete when it covers completely the terms used in optiland and when a test LLM can answer all domain questions using it.
 
 ## 📘 Sequential Raytracing Glossary
 
@@ -95,4 +97,79 @@ In a camera objective, light flows: **World → Front elements → Aperture stop
 
 ---
 
-This should give you a solid foundation for understanding Optiland's conventions. Since [*](https://optiland.readthedocs.io/en/latest/ "Welcome to Optiland’s documentation! — Optiland 0.5.8 documentation") Optiland is a Python-based, open-source framework for optical design, analysis, and optimization that can trace rays through multi-surface optical assemblies including aspherics and freeforms, and analyze paraxial properties, wavefront errors, PSFs/MTFs, these terms will map directly to its API.
+### **Optiland-Specific Concepts (Critical for Serialization)**
+
+These terms are specific to optiland's architecture and are essential for understanding the JSON representation of an optical system.
+
+| Term | Definition |
+|------|------------|
+| **Pickup** | A parameter link that copies a value from one surface to another, optionally scaled and offset. For example, making surface 4's radius always equal to the negative of surface 2's radius. The operation is: `target = scale * source + offset`. Pickups create dependencies between surfaces and must be applied after any parameter change. |
+| **Solve** | An automatic constraint that computes a surface parameter to satisfy a condition. Examples: a marginal ray height solve adjusts thickness so the marginal ray hits a target height at a surface; a quick focus solve adjusts the last thickness to place best focus on the image plane. Solves are applied during system updates. |
+| **Apodization** | A pupil weighting function that describes non-uniform illumination across the entrance pupil. Common types include uniform (constant 1.0), Gaussian, cosine-squared, Hann, Tukey, and super-Gaussian windows. Affects PSF and MTF calculations. |
+| **Surface group** | The ordered collection of all surfaces in the system, from the object surface (index 0) through all optical surfaces to the image surface (last index). This is the core data structure for sequential ray tracing — rays are traced through surfaces in index order. |
+| **Object surface** | The first surface in the surface group (index 0). Represents the object plane from which light originates. Has special properties: its thickness defines the object distance. |
+| **Image surface** | The last surface in the surface group. Represents the sensor/detector plane where rays are collected for analysis. |
+| **Semi-aperture** | The maximum radial extent of a surface — how large the surface is. Determines ray clipping. Can be set explicitly or computed from traced rays. |
+| **Interaction model** | Defines how rays interact with a surface. The main types are: refractive/reflective (standard Snell's law refraction or mirror reflection), phase (diffractive elements), and thin lens (ideal thin lens). Each interaction model can optionally include a coating and a BSDF (scattering) model. |
+| **Coordinate system** | Each surface has a local coordinate system defined by position (x, y, z), tilt rotations (rx, ry), and optional reference to a parent coordinate system. The z-axis is the optical axis, and thickness is the z-distance to the next surface. |
+| **Physical aperture** | A geometric clipping boundary on a surface (distinct from the system aperture stop). Types include circular (radial), elliptical, rectangular, and polygon. Rays outside the physical aperture are clipped (intensity set to zero). Boolean combinations (union, intersection, difference) are supported. |
+| **Backend** | Optiland supports dual computation backends: NumPy (default, CPU) and PyTorch (GPU-capable, differentiable). The backend choice affects whether gradients can be computed through the ray trace, enabling differentiable optimization. |
+| **Variable** | In the optimization context, a parameter that the optimizer is allowed to change. Common variable types include radius, thickness, conic constant, aspheric coefficients, tilt, decenter, and material. Each variable has optional bounds (min/max) and a scaler for numerical conditioning. |
+| **Operand** | A merit function term that measures some property of the optical system. Operands have a target value, optional min/max bounds, and a weight. The optimizer minimizes the weighted sum of squared deltas between current and target values. Examples: focal length, RMS spot size, aberration coefficients. |
+| **Merit function** | The scalar objective that the optimizer minimizes. It is the weighted root-sum-of-squares (RSS) of all operand deltas. A merit function value of zero means all operands exactly hit their targets. |
+| **Scaler** | A transformation applied to optimization variables for numerical conditioning. Types include identity (no scaling), linear, logarithmic, reciprocal, and power scaling. Helps optimizers work with parameters that span very different magnitudes. |
+| **Field definition** | Specifies how field points are interpreted. Four types: angle (field angle in degrees — most common), object height (height in object space), paraxial image height, and real image height. The field definition determines how the ray generator creates rays for each field point. |
+| **Vignetting factors** | Per-field scaling factors (vx, vy) that reduce the effective pupil for off-axis fields. Values between 0 and 1. A vignetting factor of 0.2 means 20% of rays at the pupil edge are blocked. Used to model real lens barrel clipping. |
+| **Multi-configuration** | A system with multiple configurations sharing the same surface structure but with different parameter values (e.g., different zoom positions, focus distances). Each configuration is a variant of the base optical system. |
+
+### **Material & Dispersion Models**
+
+| Term | Definition |
+|------|------------|
+| **Refractive index (n)** | The ratio of the speed of light in vacuum to the speed of light in the material. Higher n means light bends more at the surface. Varies with wavelength (dispersion). |
+| **Dispersion** | The variation of refractive index with wavelength. Causes chromatic aberration. Quantified by the Abbe number. |
+| **Abbe number (V_d)** | A measure of a glass's dispersion: V_d = (n_d - 1) / (n_F - n_C), where n_d, n_F, n_C are refractive indices at specific wavelengths. High V_d means low dispersion (crown glass); low V_d means high dispersion (flint glass). |
+| **Sellmeier equation** | A dispersion formula that models refractive index as a function of wavelength using resonance terms. Most accurate model for real glasses. Used by glass catalog databases. |
+| **Glass catalog** | A database of optical glass materials with their dispersion coefficients. Optiland supports standard catalogs (Schott, Ohara, Hoya, etc.) and custom materials via Abbe number approximation or data files. |
+| **GRIN (Gradient-Index) material** | A material where the refractive index varies spatially within the medium. Rays follow curved paths instead of straight lines. Requires a special propagation model. |
+| **Ideal material** | A simplified material model with a constant refractive index (no dispersion). Useful for prototyping and first-order design. |
+
+### **Paraxial Properties (First-Order Optics)**
+
+| Term | Definition |
+|------|------------|
+| **Effective focal length (EFL / f2)** | The distance from the rear principal plane to the rear focal point. Determines magnification and image scale. In optiland, accessed via `paraxial.f2()`. |
+| **Front focal length (f1)** | The distance from the front principal plane to the front focal point. For a system in air, |f1| = |f2|. |
+| **Principal planes (P1, P2)** | Virtual planes where refraction appears to happen for the entire system. All paraxial imaging formulas reference these planes. |
+| **Nodal points (N1, N2)** | Points where a ray entering at angle θ exits at the same angle θ. For a system in air, the nodal points coincide with the principal points. |
+| **ABCD matrix (ray transfer matrix)** | A 2x2 matrix that maps paraxial ray height and slope from one plane to another. Used for fast first-order analysis. In optiland: `paraxial.matrix(field_idx, wavelength_idx)`. |
+| **Working F-number** | The effective F-number accounting for magnification: F/# = 1/(2 * NA_image). More accurate than the nominal F-number for finite-conjugate systems. |
+| **Numerical aperture (NA)** | NA = n * sin(θ), where θ is the half-angle of the maximum cone of light. Object-space NA determines resolution; image-space NA determines light collection. |
+| **Total track length** | The total on-axis distance from the object surface to the image surface. A key packaging constraint in compact lens design. |
+
+### **Advanced Surface Types**
+
+| Term | Definition |
+|------|------------|
+| **Odd asphere** | An aspheric surface that includes odd-power polynomial terms (r³, r⁵, ...) in addition to even terms. Breaks bilateral symmetry — used for freeform designs. |
+| **Biconic surface** | A surface with different radii of curvature and conic constants in the X and Y directions. Used for anamorphic systems. |
+| **Toroidal surface** | A surface shaped like a section of a torus — different curvature in two perpendicular meridians. Common in eyeglass lenses. |
+| **NURBS surface** | A Non-Uniform Rational B-Spline surface. Fully freeform, defined by control points and weights. Maximum design freedom but complex to optimize. |
+| **Forbes Q-polynomials** | An alternative polynomial basis for aspheric surfaces designed for better numerical conditioning than standard power series. Variants include Q2D (2D), Qbfs (best-fit sphere), and Q normal slope. |
+| **Grid sag surface** | A surface defined by a grid of sag (height) values, interpolated for intermediate points. Used for measured or imported surface data. |
+| **Chebyshev polynomial surface** | A surface described using Chebyshev polynomials, which have better numerical properties than standard power series for optimization. |
+| **Diffraction grating** | A surface with periodic structure that diffracts light. Defined by groove spacing and can be planar or on a curved substrate. Used in spectrometers. |
+
+### **Coatings & Polarization**
+
+| Term | Definition |
+|------|------------|
+| **Simple coating** | A wavelength-independent coating model defined by constant transmittance and reflectance values. Quick approximation for anti-reflection or partial mirror coatings. |
+| **Fresnel coating** | A physically-based coating model that computes transmittance and reflectance from the refractive indices on either side of the surface, using Fresnel equations. Polarization-dependent. |
+| **Jones vector** | A 2-element complex vector describing the polarization state of light (Ex, Ey). Used for coherent polarization ray tracing. |
+| **Jones pupil** | The Jones matrix across the exit pupil, showing how the system transforms polarization state as a function of pupil position. |
+| **BSDF (Bidirectional Scattering Distribution Function)** | A function describing how light scatters from a surface. Types in optiland include Lambertian (uniform scatter) and Gaussian (peaked scatter). |
+
+---
+
+This should give you a solid foundation for understanding Optiland's conventions. Since [*](https://optiland.readthedocs.io/en/latest/ "Welcome to Optiland's documentation! — Optiland 0.5.8 documentation") Optiland is a Python-based, open-source framework for optical design, analysis, and optimization that can trace rays through multi-surface optical assemblies including aspherics and freeforms, and analyze paraxial properties, wavefront errors, PSFs/MTFs, these terms will map directly to its API.
